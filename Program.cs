@@ -87,62 +87,96 @@ namespace RabbitReceiver
                     Console.BackgroundColor = ConsoleColor.White;
                     Console.ForegroundColor = ConsoleColor.DarkRed;
                 }
-                //Dibuja el mensaje recibido en la cola
-                Console.WriteLine($"MENSAJE RECIBIDO EN {queueName}: {message}");
 
-                channel.BasicAck(vars.DeliveryTag, false);
 
                 //Si el mensaje va a la cola1, reenvia 8 veces el mensaje a la cola2
                 if(queueName == "cola1")
                 {
-                    for(int i = 0; i < 8; i++)
+                    JObject jsonObject = JsonConvert.DeserializeObject<JObject>(message);
+                    string mensajeNuevo = jsonObject["message"].Value<string>();
+                    //Dibuja el mensaje recibido en la cola
+                    Console.WriteLine($"MENSAJE RECIBIDO EN {queueName}: {mensajeNuevo}");
+
+                    channel.BasicAck(vars.DeliveryTag, false);
+                    for (int i = 0; i < 8; i++)
                     {
-                        sendMessage(message);
+                        sendMessage(mensajeNuevo);
                     }
                 }
-
-                //Recibir archivo base64
-                try
-                {   
-                    //Valida si el mensaje contiene un JSON 
-                    bool traeArchivoBase64 = message.Contains("\"img\":\"data");
-                    if (traeArchivoBase64)
-                    {
-
-                        //Des-serializa el string JSON y lo convierte a un objeto
-                        JObject jsonObject = JsonConvert.DeserializeObject<JObject>(message);
-
-                        //Obtiene las propiedades obtenidas en el objeto JSON
-                        string user = jsonObject["user"].Value<string>();
-                        string pass = jsonObject["pass"].Value<string>();
-                        string img = jsonObject["img"].Value<string>();
-
-                        //Obtiene el base64 como tal, del objeto JSON
-                        string[] parts = img.Split(',');
-                        string part2 = parts[1];
-
-                        //Valida si existe el folder para guardar la imagen, sino lo crea
-                        if (!Directory.Exists("C:\\descargasRabbit\\"))
-                        {
-                            Directory.CreateDirectory("C:\\descargasRabbit\\");
-                            Console.WriteLine("Folder created successfully.");
-                        }
-
-                        //Convierte el base64 a un array de bytes
-                        byte[] imgByteArray = Convert.FromBase64String(part2);
-                        //guarda la imagen en el folder 
-                        File.WriteAllBytes("C:\\descargasRabbit\\" + $"{user}.png", imgByteArray);
-                        Console.WriteLine("Imagen guardada.");
-                    }
-                    else
-                    {
-
-                    }
-                }
-                catch (JsonException ex)
+                else
                 {
-                    Console.WriteLine("Imagen no pudo ser guardada por motivo: " + ex);
+                    //Recibir archivo base64
+                    try
+                    {
+                        //Valida si el mensaje contiene un JSON 
+                        bool traeArchivoBase64 = message.Contains("\"img\":\"data");
+                        if (traeArchivoBase64)
+                        {
+                        
+                            //Des-serializa el string JSON y lo convierte a un objeto
+                            JObject jsonObject = JsonConvert.DeserializeObject<JObject>(message);
+
+                            //Obtiene las propiedades obtenidas en el objeto JSON
+                            string nombreArchivo = jsonObject["message"].Value<string>();
+                            string img = jsonObject["img"].Value<string>();
+
+                            //Obtiene el base64 como tal, del objeto JSON
+                            string[] parts = img.Split(',');
+                            string part2 = parts[1];
+
+                            //Valida si existe el folder para guardar la imagen, sino lo crea
+                            if (!Directory.Exists("C:\\descargasRabbit\\"))
+                            {
+                                Directory.CreateDirectory("C:\\descargasRabbit\\");
+                                Console.WriteLine("Carpeta creada correctamente.");
+                            }
+
+                            //Convierte el base64 a un array de bytes
+                            byte[] imgByteArray = Convert.FromBase64String(part2);
+                            //guarda la imagen en el folder 
+                            File.WriteAllBytes("C:\\descargasRabbit\\" + $"{nombreArchivo}.png", imgByteArray);
+                            Console.WriteLine("Imagen guardada.");
+
+
+                            channel.BasicAck(vars.DeliveryTag, false);
+                        }
+                        else
+                        {
+                            bool vieneObjeto = message.Contains("*");
+                            string part2 = "";
+                            if (vieneObjeto)
+                            {
+                                string[] parts = message.Split('*');
+                                part2 = parts[1];
+                            }
+                            else
+                            {
+                                part2 = message;
+                            }
+                            
+                            JObject jsonObject = JsonConvert.DeserializeObject<JObject>(part2);
+                            string mensajeNuevo = jsonObject["message"].Value<string>();
+
+                            //Dibuja el mensaje recibido en la cola
+                            if (vieneObjeto)
+                            {
+                                Console.WriteLine($"MENSAJE RECIBIDO EN {queueName}, COLA 1 DICE: {mensajeNuevo}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"MENSAJE RECIBIDO EN {queueName}: {mensajeNuevo}");
+                            }
+
+                            channel.BasicAck(vars.DeliveryTag, false);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        Console.WriteLine("Imagen no pudo ser guardada por motivo: " + ex);
+                    }
                 }
+
+
             };
 
             //Cierra la conexion del receiver
@@ -186,7 +220,13 @@ namespace RabbitReceiver
             //Envia el mensaje recibido, de vuelta a la cola2, con la diferenciacion
             try
             {
-                byte[] messageBodyBytes = Encoding.UTF8.GetBytes("Cola 1 dice: " + receivedMessage);
+                JObject jsonObject = new JObject();
+                jsonObject["message"] = receivedMessage;
+
+                // Convert the JObject to a JSON string
+                string jsonString = jsonObject.ToString();
+
+                byte[] messageBodyBytes = Encoding.UTF8.GetBytes("Cola 1 dice*" + jsonString);
                 channel.BasicPublish(exchangeName, routingKey, null, messageBodyBytes);
 
                 return true;
